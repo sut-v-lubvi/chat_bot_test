@@ -1,37 +1,86 @@
-const TelegramBot = require('node-telegram-bot-api');
-const axios = require('axios');
-const cheerio = require('cheerio');
+const TelegramBot = require("node-telegram-bot-api");
+const fs = require("fs");
+const request = require("request");
+const path = require("path");
+const docxPdf = require("docx-pdf");
 
-const token = '6755071690:AAFYYRrQJc1o_NPNUKQavOuc9ILSl428f5U';
-
+const token = "6755071690:AAFYYRrQJc1o_NPNUKQavOuc9ILSl428f5U";
 const bot = new TelegramBot(token, { polling: true });
 
+const download = (url, path, callback) => {
+  request.head(url, (err, res, body) => {
+    request(url).pipe(fs.createWriteStream(path)).on("close", callback);
+  });
+};
+
 bot.onText(/\/start/, (msg) => {
-    const chatId = msg.chat.id;
-    bot.sendPhoto(chatId, './img/sticker.webp');
+  const chatId = msg.chat.id;
+  bot.sendPhoto(chatId, "./img/sticker.webp");
 
-    bot.sendMessage(chatId, 'Здорова чушка!');
-
+  bot.sendMessage(
+    chatId,
+    "Салам ! Отправь мне файл в формате .docx для конвертации."
+  );
 });
 
-bot.onText(/\/getdata/, async (msg) => {
-    const chatId = msg.chat.id;
+bot.on("document", async (msg) => {
+  const fileId = msg.document.file_id;
+  const fileExt = msg.document.file_name.split(".").pop().toLowerCase();
 
-    const url = 'https://dzen.ru/a/X-hGvw0Md1msvlZB';
-    try {
-        const response = await axios.get(url);
-        console.log(response)
-        const $ = cheerio.load(response.data);
-        const data = $('.publication-columns-layout__columns-container').text();
-        console.log(`Данные с горнолыжного курорта: ${data}`)
+  try {
+    if (fileExt === "docx") {
+      const pathToOldFile = `./files/${fileId}.docx`;
+      const pathToNewfile = `./files/${fileId}.pdf`;
 
-        bot.sendMessage(chatId, `Данные с горнолыжного курорта: ${data}`);
-    } catch (error) {
-        console.error('Ошибка при получении данных:', error);
-        bot.sendMessage(chatId, 'Произошла ошибка при получении данных с сайта горнолыжного курорта.');
+      bot.sendMessage(msg.chat.id, "Выберите формат для конвертации:", {
+        reply_markup: {
+          inline_keyboard: [[{ text: "PDF", callback_data: "pdf" }]],
+        },
+      });
+
+      bot.on("callback_query", async (query) => {
+        if (query.data === "pdf") {
+          let filePath;
+          bot.getFile(fileId).then((resp) => {
+            filePath = resp.file_path;
+            const downloadURL = `https://api.telegram.org/file/bot${token}/${filePath}`;
+
+            download(
+              downloadURL,
+              path.join(__dirname, `files`, `${fileId}.docx`),
+              () => {
+                docxPdf(pathToOldFile, pathToNewfile, function (err, result) {
+                  if (err) {
+                    console.log(err);
+                  }
+                  bot.sendDocument(msg.chat.id, pathToNewfile);
+
+                  console.log("result" + result);
+                });
+
+                setTimeout(() => {
+                  fs.unlink(pathToOldFile, (err) => {
+                    if (err) throw err;
+                    console.log("OldFile deleted successfully!");
+                  });
+                  fs.unlink(pathToNewfile, (err) => {
+                    if (err) throw err;
+                    console.log("NewFile deleted successfully!");
+                  });
+                }, [3000]);
+              }
+            );
+          });
+        }
+      });
+    } else {
+      throw new Error("Пожалуйста, отправьте файл в формате .docx");
     }
+  } catch (error) {
+    console.error(error);
+    bot.sendMessage(
+      msg.chat.id,
+      "Произошла ошибка при обработке файла. Пожалуйста, отправьте файл в формате .docx"
+    );
+  }
 });
-
-bot.on('message', (msg) => {
-    const chatId = msg.chat.id;
-    bot.sendMessage(chatId, 'Отправьте мне команду /getdata, чтобы получить данные с горнолыжного курорта.');});
